@@ -34,9 +34,9 @@ main{max-width:1300px;margin:auto;padding:12px 25px 60px}.intro{margin:12px 0 23
 <div class="legend"><span><i class="dot" style="background:#fff"></i>Road</span><span><i class="dot" style="background:#54e4d1"></i>Vision rays</span><span><i class="dot" style="background:#ffbd69"></i>Start direction</span><span><i class="dot" style="background:#a88bff"></i>Selected AI</span></div>
 </section>
 <aside class="panel"><h2>Training control room</h2><p class="sub">Train, test and improve. A new champion must beat the previous record by at least 8%.</p>
-<div class="stats"><div class="stat"><small>GENERATION</small><strong id="generation">0</strong></div><div class="stat"><small>CHAMPION SCORE</small><strong id="best">0</strong></div><div class="stat"><small>ALIVE NOW</small><strong id="alive">0/10</strong></div></div>
-<div class="readout" style="margin-top:0"><div class="readout-top"><h3>CHAMPION GATE</h3><span class="chip" id="gateState">WAITING</span></div><p class="sub" style="margin:8px 0 0">Next champion must score <strong id="targetScore">—</strong> or higher. Ties and tiny improvements are rejected.</p><div class="bar" style="height:7px;margin-top:10px"><i id="progressBar"></i></div><p class="sub" id="learningMessage" style="margin:8px 0 0">The first generation sets the starting record.</p></div>
-<div class="readout"><div class="readout-top"><h3>Selected driver <span id="driverName">—</span></h3><span class="chip" id="driverState">WAITING</span></div>
+<div class="stats"><div class="stat"><small>GENERATION</small><strong id="generation">0</strong></div><div class="stat"><small>BEST LAP</small><strong id="best">—</strong></div><div class="stat"><small>ALIVE NOW</small><strong id="alive">0/10</strong></div></div>
+<div class="readout" style="margin-top:0"><div class="readout-top"><h3>CHAMPION GATE</h3><span class="chip" id="gateState">WAITING</span></div><p class="sub" style="margin:8px 0 0">Next champion must beat the lap record by at least 8%. Similar times do not count.</p><div class="bar" style="height:7px;margin-top:10px"><i id="progressBar"></i></div><p class="sub" id="learningMessage" style="margin:8px 0 0">The first generation sets the starting record.</p></div>
+<div class="readout"><div class="readout-top"><h3>Selected driver <span id="driverName">—</span></h3><span class="chip" id="driverState">WAITING</span></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px"><div class="stat"><small>CURRENT LAP</small><strong id="lapTime" style="font-size:1.05rem">0.00s</strong></div><div class="stat"><small>LAPS COMPLETED</small><strong id="lapsDone" style="font-size:1.05rem">0</strong></div></div>
 <p class="sub" style="margin:8px 0 0">Three vision sensors measure how far the road extends ahead-left, ahead, and ahead-right.</p>
 <div style="display:flex;justify-content:space-between;font-size:.7rem;color:var(--muted);margin-top:13px"><span>CAR SPEED</span><strong id="speedVal">0</strong></div><div class="bar"><i id="speedBar"></i></div><div style="display:flex;justify-content:space-between;font-size:.7rem;color:var(--muted);margin-top:13px"><span>LEFT SENSOR</span><strong id="leftVal">—</strong></div><div class="bar"><i id="leftBar"></i></div>
 <div style="display:flex;justify-content:space-between;font-size:.7rem;color:var(--muted);margin-top:9px"><span>CENTRE SENSOR</span><strong id="midVal">—</strong></div><div class="bar"><i id="midBar"></i></div>
@@ -54,7 +54,7 @@ main{max-width:1300px;margin:auto;padding:12px 25px 60px}.intro{margin:12px 0 23
 (()=>{
 const $=id=>document.getElementById(id),canvas=$('track'),ctx=canvas.getContext('2d'),road=document.createElement('canvas');road.width=900;road.height=560;const rc=road.getContext('2d',{willReadFrequently:true});
 const W=900,H=560,POP=10,MAX_RAY=145,STEP=1/60;
-let mode='draw',drawing=false,last=null,running=false,paused=false,generation=0,cars=[],selected=0,bestEver=0,lastTime=0,elapsed=0,roadWidth=64,frame=0,mutationRate=.18,previousGenerationBest=0;
+let mode='draw',drawing=false,last=null,running=false,paused=false,generation=0,cars=[],selected=0,bestEver=0,lastTime=0,elapsed=0,roadWidth=64,frame=0,mutationRate=.18,previousGenerationBest=0,bestLapEver=Infinity;
 let start={x:145,y:280,angle:0};
 function grass(){rc.fillStyle='#172a23';rc.fillRect(0,0,W,H);rc.strokeStyle='#1d382c';rc.lineWidth=1;for(let x=0;x<W;x+=35){rc.beginPath();rc.moveTo(x,0);rc.lineTo(x,H);rc.stroke()}for(let y=0;y<H;y+=35){rc.beginPath();rc.moveTo(0,y);rc.lineTo(W,y);rc.stroke()}}
 function drawRoad(x1,y1,x2,y2){rc.lineCap='round';rc.lineJoin='round';rc.strokeStyle='#e7edf3';rc.lineWidth=roadWidth;rc.beginPath();rc.moveTo(x1,y1);rc.lineTo(x2,y2);rc.stroke();rc.strokeStyle='#ffffff';rc.lineWidth=2;rc.beginPath();rc.moveTo(x1,y1);rc.lineTo(x2,y2);rc.stroke()}
@@ -65,19 +65,68 @@ function sensors(car,data){return [-.72,0,.72].map(a=>ray(car,car.angle+a,data))
 function rand(){return Math.random()*2-1}
 function network(){return {w1:Array.from({length:4},()=>Array.from({length:4},rand)),b1:Array.from({length:4},rand),w2:Array.from({length:3},()=>Array.from({length:4},rand)),b2:Array.from({length:3},rand)}}
 function think(net,input){const hidden=net.w1.map((row,i)=>Math.tanh(row.reduce((s,w,j)=>s+w*input[j],net.b1[i])));const outputs=net.w2.map((row,i)=>Math.tanh(hidden.reduce((s,v,j)=>s+v*row[j],net.b2[i])));return {hidden,steer:outputs[0],throttle:(outputs[1]+1)/2,brake:(outputs[2]+1)/2}}
-function makeCar(net=network(),i=0){return {x:start.x,y:start.y,angle:start.angle,speed:55,net,alive:true,distance:0,age:0,fitness:0,sensors:[0,0,0],hidden:[0,0,0,0],steer:0,throttle:.5,brake:.5,id:i}}
+function makeCar(net=network(),i=0){return {x:start.x,y:start.y,angle:start.angle,speed:55,net,alive:true,distance:0,age:0,fitness:0,sensors:[0,0,0],hidden:[0,0,0,0],steer:0,throttle:.5,brake:.5,id:i,lapElapsed:0,laps:0,bestLap:Infinity,gateArmed:false}}
 function spawn(){cars=Array.from({length:POP},(_,i)=>makeCar(i===0&&generation>0?bestNet:network(),i));selected=0;renderPopulation();updateStats()}
 let bestNet=network();
 function mutate(net,amount=.28){const n=JSON.parse(JSON.stringify(net));for(const row of n.w1)for(let j=0;j<row.length;j++)if(Math.random()<.75)row[j]+=rand()*amount;for(let i=0;i<4;i++)if(Math.random()<.75)n.b1[i]+=rand()*amount;for(let i=0;i<3;i++){for(let j=0;j<4;j++)if(Math.random()<.75)n.w2[i][j]+=rand()*amount;n.b2[i]+=rand()*amount}return n}
-function evolve(){const ranked=[...cars].sort((a,b)=>b.fitness-a.fitness);const candidate=ranked[0]||{fitness:0,net:bestNet};const target=bestEver===0?0:Math.max(bestEver*1.08,bestEver+25);const promoted=bestEver===0||candidate.fitness>=target;previousGenerationBest=candidate.fitness;if(promoted){bestEver=candidate.fitness;bestNet=JSON.parse(JSON.stringify(candidate.net));mutationRate=Math.max(.10,mutationRate*.88);$('gateState').textContent='NEW CHAMPION';$('learningMessage').textContent='Record beaten! The stronger neural network becomes the new champion.';$('hint').textContent='NEW CHAMPION! Score '+Math.round(bestEver)+'. The AI has made a real improvement.'}else{mutationRate=Math.min(.65,mutationRate+.07);$('gateState').textContent='NOT GOOD ENOUGH';$('learningMessage').textContent='Best was '+Math.round(candidate.fitness)+'. It did not beat the '+Math.round(target)+' target. Keeping the champion and increasing mutations.';$('hint').textContent='No promotion. The score was too close to the old record. The champion stays and the next batch explores harder.'}generation++;const next=[JSON.parse(JSON.stringify(bestNet))];for(let i=1;i<POP;i++)next.push(mutate(bestNet,mutationRate+Math.random()*.12));cars=next.map((n,i)=>makeCar(n,i));selected=0;elapsed=0;renderPopulation();updateStats();updateGate();}
-function updateStats(){$('generation').textContent=generation;$('best').textContent=Math.round(bestEver);$('alive').textContent=cars.filter(c=>c.alive).length+'/'+POP;updateGate()}function updateGate(){const target=bestEver===0?0:Math.max(bestEver*1.08,bestEver+25);$('targetScore').textContent=target?Math.ceil(target):'first score';$('progressBar').style.width=target?Math.min(100,previousGenerationBest/target*100)+'%':'0%'}
+function evolve(){
+const finishers=cars.filter(c=>Number.isFinite(c.bestLap)).sort((a,b)=>a.bestLap-b.bestLap);
+const ranked=[...cars].sort((a,b)=>b.fitness-a.fitness);
+const candidate=finishers[0]||ranked[0]||{fitness:0,net:bestNet,bestLap:Infinity};
+const hasLap=Number.isFinite(candidate.bestLap);
+const target=Number.isFinite(bestLapEver)?bestLapEver*.92:Infinity;
+const promoted=hasLap?(!Number.isFinite(bestLapEver)||candidate.bestLap<=target):(!Number.isFinite(bestLapEver)&&bestEver===0);
+previousGenerationBest=candidate.fitness;
+if(promoted){
+ if(hasLap){bestLapEver=candidate.bestLap;bestEver=candidate.fitness;$('gateState').textContent='NEW LAP RECORD';$('learningMessage').textContent='New fastest lap: '+bestLapEver.toFixed(2)+' seconds. Champion network saved.';$('hint').textContent='NEW LAP RECORD! '+bestLapEver.toFixed(2)+' seconds. The AI found a faster way around.'}
+ else{$('gateState').textContent='BEST DISTANCE';$('learningMessage').textContent='No full lap yet. Keeping the strongest distance driver while the AI learns.';$('hint').textContent='No full lap yet — keeping the driver that travelled furthest.';bestEver=candidate.fitness}
+ bestNet=JSON.parse(JSON.stringify(candidate.net));mutationRate=Math.max(.10,mutationRate*.88);
+}else{
+ mutationRate=Math.min(.65,mutationRate+.07);
+ $('gateState').textContent=hasLap?'TIME NOT FAST ENOUGH':'NO LAP';
+ $('learningMessage').textContent=hasLap?'Best lap was '+candidate.bestLap.toFixed(2)+'s. It needed to beat '+target.toFixed(2)+'s (8% faster). Champion kept; mutation increased.':'No driver completed a lap this generation. Champion kept; mutation increased.';
+ $('hint').textContent=hasLap?'Not a new record. The AI must be at least 8% faster.':'No complete lap yet. The AI is still exploring.';
+}
+generation++;
+const next=[JSON.parse(JSON.stringify(bestNet))];
+for(let i=1;i<POP;i++)next.push(mutate(bestNet,mutationRate+Math.random()*.12));
+cars=next.map((n,i)=>makeCar(n,i));selected=0;elapsed=0;renderPopulation();updateStats();updateGate();
+}
+function updateStats(){$('generation').textContent=generation;$('best').textContent=Number.isFinite(bestLapEver)?bestLapEver.toFixed(2)+'s':'—';$('alive').textContent=cars.filter(c=>c.alive).length+'/'+POP;updateGate()}
+function updateGate(){const target=Number.isFinite(bestLapEver)?bestLapEver*.92:0;$('targetScore').textContent=target?target.toFixed(2)+'s or faster':'first completed lap';$('progressBar').style.width=target?'8%':'0%'}
 function renderPopulation(){const box=$('population');box.innerHTML='';cars.forEach((c,i)=>{const b=document.createElement('button');b.className='car-mini'+(i===selected?' selected':'');b.innerHTML='AI '+(i+1)+'<div class="bar"><i style="width:0%"></i></div>';b.onclick=()=>{selected=i;renderPopulation();updateReadout()};box.appendChild(b)})}
-function updateReadout(){const c=cars[selected];if(!c)return;$('driverName').textContent='#'+(selected+1);$('driverState').textContent=c.alive?(running?'THINKING':'READY'):'OFF TRACK';['left','mid','right'].forEach((id,i)=>{$(id+'Val').textContent=Math.round(c.sensors[i])+' px';$(id+'Bar').style.width=(c.sensors[i]/MAX_RAY*100)+'%'});$('speedVal').textContent=Math.round(c.speed)+' px/s';$('speedBar').style.width=(c.speed/160*100)+'%';['n0','n1','n2'].forEach((id,i)=>$(id).style.width=(c.sensors[i]/MAX_RAY*100)+'%');$('n3').style.width=(c.speed/160*100)+'%';['h0','h1','h2','h3'].forEach((id,i)=>$(id).style.width=((c.hidden[i]+1)*50)+'%');$('out').style.width=((c.steer+1)*50)+'%';$('throttleNode').style.width=(c.throttle*100)+'%';$('brakeNode').style.width=(c.brake*100)+'%'}
+function updateReadout(){const c=cars[selected];if(!c)return;$('driverName').textContent='#'+(selected+1);$('driverState').textContent=c.alive?(running?'THINKING':'READY'):'OFF TRACK';$('lapTime').textContent=c.lapElapsed.toFixed(2)+'s';$('lapsDone').textContent=c.laps;['left','mid','right'].forEach((id,i)=>{$(id+'Val').textContent=Math.round(c.sensors[i])+' px';$(id+'Bar').style.width=(c.sensors[i]/MAX_RAY*100)+'%'});$('speedVal').textContent=Math.round(c.speed)+' px/s';$('speedBar').style.width=(c.speed/160*100)+'%';['n0','n1','n2'].forEach((id,i)=>$(id).style.width=(c.sensors[i]/MAX_RAY*100)+'%');$('n3').style.width=(c.speed/160*100)+'%';['h0','h1','h2','h3'].forEach((id,i)=>$(id).style.width=((c.hidden[i]+1)*50)+'%');$('out').style.width=((c.steer+1)*50)+'%';$('throttleNode').style.width=(c.throttle*100)+'%';$('brakeNode').style.width=(c.brake*100)+'%'}
 function drawArrow(){ctx.save();ctx.translate(start.x,start.y);ctx.rotate(start.angle);ctx.fillStyle='#ffbd69';ctx.strokeStyle='#402a0b';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(24,0);ctx.lineTo(-16,-13);ctx.lineTo(-10,0);ctx.lineTo(-16,13);ctx.closePath();ctx.fill();ctx.stroke();ctx.restore();ctx.fillStyle='#ffbd69';ctx.font='bold 13px system-ui';ctx.fillText('START',start.x-24,start.y-25)}
 function drawCar(c,i){ctx.save();ctx.translate(c.x,c.y);ctx.rotate(c.angle);ctx.fillStyle=i===selected?'#7462a6':['#c45d55','#398d83','#d17b35','#477aa1','#9273a8'][i%5];ctx.strokeStyle='#26343a';ctx.lineWidth=2;ctx.beginPath();ctx.roundRect(-13,-8,26,16,4);ctx.fill();ctx.stroke();ctx.fillStyle='#f3eee2';ctx.fillRect(1,-5,7,10);ctx.fillStyle='#26343a';ctx.fillRect(-10,-10,7,4);ctx.fillRect(4,-10,7,4);ctx.fillRect(-10,6,7,4);ctx.fillRect(4,6,7,4);ctx.restore()}
 function render(){ctx.clearRect(0,0,W,H);ctx.drawImage(road,0,0);drawArrow();for(let i=0;i<cars.length;i++){const c=cars[i];if(!c.alive&&i!==selected)continue;drawCar(c,i);if(i===selected){const data=rc.getImageData(0,0,W,H).data;const angles=[-.72,0,.72];ctx.save();ctx.lineWidth=2;angles.forEach((a,j)=>{const ang=c.angle+a,d=c.sensors[j];ctx.strokeStyle=['#55e4d1','#ffbd69','#55e4d1'][j];ctx.globalAlpha=.9;ctx.beginPath();ctx.moveTo(c.x,c.y);ctx.lineTo(c.x+Math.cos(ang)*Math.max(8,d),c.y+Math.sin(ang)*Math.max(8,d));ctx.stroke()});ctx.restore()}}}
-function tick(){if(!running||paused)return;const data=rc.getImageData(0,0,W,H).data;let living=0;for(const c of cars){if(!c.alive)continue;living++;const s=sensors(c,data);c.sensors=s;const input=[...s.map(v=>v/MAX_RAY),c.speed/160];const result=think(c.net,input);c.hidden=result.hidden;c.steer=result.steer;c.throttle=result.throttle;c.brake=result.brake;c.angle+=c.steer*(.65+c.speed/160)*2.05*STEP;const acceleration=145*c.throttle-225*c.brake-14;c.speed=Math.max(28,Math.min(160,c.speed+acceleration*STEP));c.x+=Math.cos(c.angle)*c.speed*STEP;c.y+=Math.sin(c.angle)*c.speed*STEP;c.distance+=c.speed*STEP;c.age+=STEP;if(!sample(c.x,c.y,data)){c.alive=false;c.fitness=c.distance+c.age*8}else{c.fitness=c.distance+c.age*8}}elapsed+=STEP;if(frame++%3===0){render();updateStats();updateReadout();const boxes=$('population').children;cars.forEach((c,i)=>{if(boxes[i])boxes[i].querySelector('i').style.width=Math.min(100,c.fitness/Math.max(1,bestEver||300)*100)+'%'})}if(living===0||elapsed>24){evolve()}requestAnimationFrame(tick)}
-function startTraining(){if(!roadHasPixels()){toast('Draw a road first!');return}if(!running){running=true;paused=false;$('run').textContent='↻ Restart';$('pause').disabled=false;$('status').textContent='● TRAINING';if(!cars.length)spawn();}else if(paused){paused=false;$('pause').textContent='Ⅱ Pause';$('status').textContent='● TRAINING'}else{generation=0;bestEver=0;bestNet=network();mutationRate=.18;previousGenerationBest=0;spawn();elapsed=0;updateGate()}lastTime=performance.now();requestAnimationFrame(tick)}
+function gateForward(x,y){return (x-start.x)*Math.cos(start.angle)+(y-start.y)*Math.sin(start.angle)}
+function gateSide(x,y){return -(x-start.x)*Math.sin(start.angle)+(y-start.y)*Math.cos(start.angle)}
+function tick(){
+if(!running||paused)return;
+const data=rc.getImageData(0,0,W,H).data;let living=0;
+for(const c of cars){
+ if(!c.alive)continue;living++;
+ const s=sensors(c,data);c.sensors=s;
+ const input=[...s.map(v=>v/MAX_RAY),c.speed/160];
+ const result=think(c.net,input);c.hidden=result.hidden;c.steer=result.steer;c.throttle=result.throttle;c.brake=result.brake;
+ c.angle+=c.steer*(.65+c.speed/160)*2.05*STEP;
+ const acceleration=145*c.throttle-225*c.brake-14;
+ c.speed=Math.max(28,Math.min(160,c.speed+acceleration*STEP));
+ const oldForward=gateForward(c.x,c.y);
+ const nx=c.x+Math.cos(c.angle)*c.speed*STEP,ny=c.y+Math.sin(c.angle)*c.speed*STEP;
+ const newForward=gateForward(nx,ny),side=gateSide(nx,ny);
+ c.x=nx;c.y=ny;c.distance+=c.speed*STEP;c.age+=STEP;c.lapElapsed+=STEP;
+ if(c.distance>100)c.gateArmed=true;
+ if(c.gateArmed&&oldForward<0&&newForward>=0&&Math.abs(side)<roadWidth*.85&&Math.cos(c.angle-start.angle)>.25){c.laps++;c.bestLap=Math.min(c.bestLap,c.lapElapsed);c.lapElapsed=0;c.gateArmed=false}
+ if(!sample(c.x,c.y,data))c.alive=false;
+ c.fitness=c.laps*100000+c.distance+c.age*8;
+}
+elapsed+=STEP;
+if(frame++%3===0){render();updateStats();updateReadout();const boxes=$('population').children;cars.forEach((c,i)=>{if(boxes[i])boxes[i].querySelector('i').style.width=Math.min(100,c.fitness/Math.max(1,bestEver||300)*100)+'%'})}
+if(living===0||elapsed>60)evolve();
+requestAnimationFrame(tick);
+}
+function startTraining(){if(!roadHasPixels()){toast('Draw a road first!');return}if(!running){running=true;paused=false;$('run').textContent='↻ Restart';$('pause').disabled=false;$('status').textContent='● TRAINING';if(!cars.length)spawn();}else if(paused){paused=false;$('pause').textContent='Ⅱ Pause';$('status').textContent='● TRAINING'}else{generation=0;bestEver=0;bestLapEver=Infinity;bestNet=network();mutationRate=.18;previousGenerationBest=0;spawn();elapsed=0;updateGate()}lastTime=performance.now();requestAnimationFrame(tick)}
 function roadHasPixels(){const d=rc.getImageData(0,0,W,H).data;return sample(start.x,start.y,d)}
 function setMode(m){mode=m;$('drawMode').classList.toggle('active',m==='draw');$('startMode').classList.toggle('active',m==='start');$('hint').textContent=m==='draw'?'Draw a thick continuous road on the grass.':'Drag from the start point to aim the arrow in the direction cars should drive.'}
 function pos(e){const r=canvas.getBoundingClientRect();return{x:(e.clientX-r.left)/r.width*W,y:(e.clientY-r.top)/r.height*H}}
@@ -87,8 +136,8 @@ canvas.addEventListener('pointerup',()=>{drawing=false;last=null;render()});canv
 $('drawMode').onclick=()=>setMode('draw');$('startMode').onclick=()=>setMode('start');
 $('width').oninput=e=>{roadWidth=+e.target.value;$('widthVal').textContent=roadWidth+' px'};
 $('run').onclick=startTraining;$('pause').onclick=()=>{if(!running)return;paused=!paused;$('pause').textContent=paused?'▶ Resume':'Ⅱ Pause';$('status').textContent=paused?'Ⅱ PAUSED':'● TRAINING';if(!paused)requestAnimationFrame(tick)};
-$('clear').onclick=()=>{running=false;paused=false;generation=0;bestEver=0;mutationRate=.18;previousGenerationBest=0;bestNet=network();cars=[];grass();start={x:145,y:280,angle:0};$('run').textContent='▶ Start training';$('pause').disabled=true;$('pause').textContent='Ⅱ Pause';$('status').textContent='● EDIT MODE';renderPopulation();updateStats();render();updateReadout();$('hint').textContent='Track cleared. Draw a new road.'};
-$('example').onclick=()=>{running=false;paused=false;grass();const pts=[[105,280],[120,165],[235,95],[390,110],[520,85],[690,135],[790,245],[760,365],[650,445],[485,435],[360,470],[220,420],[115,350]];for(let i=1;i<pts.length;i++)drawRoad(...pts[i-1],...pts[i]);drawRoad(...pts[pts.length-1],...pts[0]);start={x:105,y:280,angle:-Math.PI/2};generation=0;bestEver=0;mutationRate=.18;previousGenerationBest=0;bestNet=network();cars=[];$('run').textContent='▶ Start training';$('pause').disabled=true;$('status').textContent='● EDIT MODE';renderPopulation();updateStats();render();$('hint').textContent='Example circuit loaded. The arrow points along the road. Press Start training.'};
+$('clear').onclick=()=>{running=false;paused=false;generation=0;bestEver=0;bestLapEver=Infinity;mutationRate=.18;previousGenerationBest=0;bestNet=network();cars=[];grass();start={x:145,y:280,angle:0};$('run').textContent='▶ Start training';$('pause').disabled=true;$('pause').textContent='Ⅱ Pause';$('status').textContent='● EDIT MODE';renderPopulation();updateStats();render();updateReadout();$('hint').textContent='Track cleared. Draw a new road.'};
+$('example').onclick=()=>{running=false;paused=false;grass();const pts=[[105,280],[120,165],[235,95],[390,110],[520,85],[690,135],[790,245],[760,365],[650,445],[485,435],[360,470],[220,420],[115,350]];for(let i=1;i<pts.length;i++)drawRoad(...pts[i-1],...pts[i]);drawRoad(...pts[pts.length-1],...pts[0]);start={x:105,y:280,angle:-Math.PI/2};generation=0;bestEver=0;bestLapEver=Infinity;mutationRate=.18;previousGenerationBest=0;bestNet=network();cars=[];$('run').textContent='▶ Start training';$('pause').disabled=true;$('status').textContent='● EDIT MODE';renderPopulation();updateStats();render();$('hint').textContent='Example circuit loaded. The arrow points along the road. Press Start training.'};
 function toast(msg){$('hint').textContent=msg}
 render();updateStats();updateReadout();renderPopulation();updateGate();
 })();
